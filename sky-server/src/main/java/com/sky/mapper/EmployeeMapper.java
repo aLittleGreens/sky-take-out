@@ -26,6 +26,7 @@ public interface EmployeeMapper {
 
     /**
      * 分页查询
+     *
      * @param employeePageQueryDTO
      * @return
      */
@@ -33,7 +34,11 @@ public interface EmployeeMapper {
 
     /**
      * 动态修改属性
+     *
      * @param employee
      */
     void update(Employee employee);
+
+    @Select("select * from employee where id = #{id}")
+    Employee getEmployeeById(Integer id);
 }
