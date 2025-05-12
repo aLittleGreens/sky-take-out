@@ -121,7 +121,7 @@ public class DishServiceImpl implements DishService {
             }
         }
 
-        //收否被套餐包含
+        //是否被套餐包含
         List<Long> setmealIds= setmealDishMapper.getSetmealIdByDishId(ids);
         if (setmealIds != null && setmealIds.size() > 0) {
             throw new DeletionNotAllowedException(MessageConstant.DISH_BE_RELATED_BY_SETMEAL);
