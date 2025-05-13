@@ -18,9 +18,11 @@ public interface DishService {
 
     void save(DishDTO dishDTO);
 
-    List<Dish> getDishByCategoryId(Integer categoryId);
+    List<Dish> getDishByCategoryId(Long categoryId);
 
     void startOrStop(Integer status, Long id);
 
     void deleteDish(List<Long> ids);
+
+    List<DishVO> listWithFlavor(Dish dish);
 }
