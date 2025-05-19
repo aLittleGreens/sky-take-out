@@ -19,6 +19,7 @@ import com.sky.vo.OrderPaymentVO;
 import com.sky.vo.OrderStatisticsVO;
 import com.sky.vo.OrderSubmitVO;
 import com.sky.vo.OrderVO;
+import com.sky.websocket.WebSocketServer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +53,9 @@ public class OrderServiceImpl implements OrderService {
     private AddressBookMapper addressBookMapper;
     @Autowired
     private WeChatPayUtil weChatPayUtil;
+
+    @Autowired
+    private WebSocketServer webSocketServer;
 
     /**
      * 用户下单
@@ -108,12 +112,7 @@ public class OrderServiceImpl implements OrderService {
         shoppingCartMapper.deleteByUserId(userId);
 
         //封装返回结果
-        OrderSubmitVO orderSubmitVO = OrderSubmitVO.builder()
-                .id(order.getId())
-                .orderNumber(order.getNumber())
-                .orderAmount(order.getAmount())
-                .orderTime(order.getOrderTime())
-                .build();
+        OrderSubmitVO orderSubmitVO = OrderSubmitVO.builder().id(order.getId()).orderNumber(order.getNumber()).orderAmount(order.getAmount()).orderTime(order.getOrderTime()).build();
 
         return orderSubmitVO;
     }
@@ -131,23 +130,26 @@ public class OrderServiceImpl implements OrderService {
         //todo 模拟支付成功
         paySuccess(ordersPaymentDTO.getOrderNumber());
 
-        //调用微信支付接口，生成预支付交易单
-        JSONObject jsonObject = weChatPayUtil.pay(
-                ordersPaymentDTO.getOrderNumber(), //商户订单号
-                new BigDecimal(0.01), //支付金额，单位 元
-                "苍穹外卖订单", //商品描述
-                user.getOpenid() //微信用户的openid
-        );
+        try {
+            //todo 调用微信支付接口，生成预支付交易单
+            JSONObject jsonObject = weChatPayUtil.pay(ordersPaymentDTO.getOrderNumber(), //商户订单号
+                    new BigDecimal(0.01), //支付金额，单位 元
+                    "苍穹外卖订单", //商品描述
+                    user.getOpenid() //微信用户的openid
+            );
+            if (jsonObject.getString("code") != null && jsonObject.getString("code").equals("ORDERPAID")) {
+                throw new OrderBusinessException("该订单已支付");
+            }
+            OrderPaymentVO vo = jsonObject.toJavaObject(OrderPaymentVO.class);
+            vo.setPackageStr(jsonObject.getString("package"));
 
-        if (jsonObject.getString("code") != null && jsonObject.getString("code").equals("ORDERPAID")) {
-            throw new OrderBusinessException("该订单已支付");
+            return vo;
+
+        } catch (Exception e) {
+            e.printStackTrace();
         }
 
-        OrderPaymentVO vo = jsonObject.toJavaObject(OrderPaymentVO.class);
-        vo.setPackageStr(jsonObject.getString("package"));
-
-
-        return vo;
+        return null;
     }
 
     /**
@@ -161,14 +163,18 @@ public class OrderServiceImpl implements OrderService {
         Orders ordersDB = orderMapper.getByNumber(outTradeNo);
 
         // 根据订单id更新订单的状态、支付方式、支付状态、结账时间
-        Orders orders = Orders.builder()
-                .id(ordersDB.getId())
-                .status(Orders.TO_BE_CONFIRMED)
-                .payStatus(Orders.PAID)
-                .checkoutTime(LocalDateTime.now())
-                .build();
+        Orders orders = Orders.builder().id(ordersDB.getId()).status(Orders.TO_BE_CONFIRMED).payStatus(Orders.PAID).checkoutTime(LocalDateTime.now()).build();
 
         orderMapper.update(orders);
+
+        // 向商家推送消息，来单啦
+        Map map = new HashMap();
+        map.put("type", 1);//消息类型，1表示来单提醒
+        map.put("orderId", orders.getId());
+        map.put("content", "订单号：" + outTradeNo);
+
+        //通过WebSocket实现来单提醒，向客户端浏览器推送消息
+        webSocketServer.sendToAllClient(JSON.toJSONString(map));
     }
 
     @Override
@@ -230,18 +236,12 @@ public class OrderServiceImpl implements OrderService {
 
 
         // 根据订单id更新订单的状态、支付方式、支付状态、结账时间
-        Orders orders = Orders.builder()
-                .id(id)
-                .status(Orders.CANCELLED)
-                .cancelTime(LocalDateTime.now())
-                .cancelReason("用户取消")
-                .build();
+        Orders orders = Orders.builder().id(id).status(Orders.CANCELLED).cancelTime(LocalDateTime.now()).cancelReason("用户取消").build();
 
         // 订单处于待接单状态下取消，需要进行退款
         if (ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
             //调用微信支付退款接口
-            weChatPayUtil.refund(
-                    ordersDB.getNumber(), //商户订单号
+            weChatPayUtil.refund(ordersDB.getNumber(), //商户订单号
                     ordersDB.getNumber(), //商户退款单号
                     new BigDecimal(0.01),//退款金额，单位 元
                     new BigDecimal(0.01));//原订单金额
@@ -255,6 +255,7 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * 再来一单
+     *
      * @param id
      */
     @Override
@@ -292,7 +293,6 @@ public class OrderServiceImpl implements OrderService {
 
         return pageResult;
     }
-
 
 
     private List<OrderVO> getOrderVOList(Page<Orders> page) {
@@ -360,10 +360,7 @@ public class OrderServiceImpl implements OrderService {
      * @param ordersConfirmDTO
      */
     public void confirm(OrdersConfirmDTO ordersConfirmDTO) {
-        Orders orders = Orders.builder()
-                .id(ordersConfirmDTO.getId())
-                .status(Orders.CONFIRMED)
-                .build();
+        Orders orders = Orders.builder().id(ordersConfirmDTO.getId()).status(Orders.CONFIRMED).build();
 
         orderMapper.update(orders);
     }
@@ -384,18 +381,12 @@ public class OrderServiceImpl implements OrderService {
 
 
         // 根据订单id更新订单的状态、支付方式、支付状态、结账时间
-        Orders orders = Orders.builder()
-                .id(id)
-                .status(Orders.CANCELLED)
-                .cancelTime(LocalDateTime.now())
-                .cancelReason(ordersCancelDTO.getCancelReason())
-                .build();
+        Orders orders = Orders.builder().id(id).status(Orders.CANCELLED).cancelTime(LocalDateTime.now()).cancelReason(ordersCancelDTO.getCancelReason()).build();
 
         // 订单处于待接单状态下取消，需要进行退款
         if (ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
             //调用微信支付退款接口
-            weChatPayUtil.refund(
-                    ordersDB.getNumber(), //商户订单号
+            weChatPayUtil.refund(ordersDB.getNumber(), //商户订单号
                     ordersDB.getNumber(), //商户退款单号
                     new BigDecimal(0.01),//退款金额，单位 元
                     new BigDecimal(0.01));//原订单金额
@@ -444,7 +435,6 @@ public class OrderServiceImpl implements OrderService {
         }
 
 
-
         // 拒单需要退款，根据订单id更新订单状态、拒单原因、取消时间
         Orders orders = new Orders();
         orders.setId(ordersDB.getId());
@@ -455,18 +445,14 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.update(orders);
 
         //todo 模拟退款成功，正式环境：这个要放到上面，先退款成功后，再改状态
-        try{
+        try {
             Integer payStatus = ordersDB.getPayStatus();
             if (payStatus == Orders.PAID) {
                 //用户已支付，需要退款
-                String refund = weChatPayUtil.refund(
-                        ordersDB.getNumber(),
-                        ordersDB.getNumber(),
-                        new BigDecimal(0.01),
-                        new BigDecimal(0.01));
+                String refund = weChatPayUtil.refund(ordersDB.getNumber(), ordersDB.getNumber(), new BigDecimal(0.01), new BigDecimal(0.01));
                 log.info("申请退款：{}", refund);
             }
-        }catch (Exception e){
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -495,5 +481,24 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.update(orders);
     }
 
+    /**
+     * 用户催单
+     *
+     * @param id
+     */
+    public void reminder(Long id) {
+        // 查询订单是否存在
+        Orders orders = orderMapper.getById(id);
+        if (orders == null) {
+            throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
+        }
+
+        //基于WebSocket实现催单
+        Map map = new HashMap();
+        map.put("type", 2);//2代表用户催单
+        map.put("orderId", id);
+        map.put("content", "订单号：" + orders.getNumber());
+        webSocketServer.sendToAllClient(JSON.toJSONString(map));
+    }
 
 }
