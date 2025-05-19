@@ -22,7 +22,7 @@ public class OrderTask {
      */
     @Scheduled(cron = "0 * * * * ?")
     public void processTimeoutOrder() {
-        log.info("开始进行支付超时订单处理:{}", LocalDateTime.now());
+//        log.info("开始进行支付超时订单处理:{}", LocalDateTime.now());
         LocalDateTime time = LocalDateTime.now().plusMinutes(-15);
         List<Orders> ordersList = orderMapper.getByStatusAndOrdertimeLT(Orders.PENDING_PAYMENT, time);
         if (ordersList != null && ordersList.size() > 0) {

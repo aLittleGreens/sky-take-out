@@ -39,6 +39,7 @@ public interface OrderMapper {
 
     /**
      * 根据id查询订单
+     *
      * @param id
      */
     @Select("select * from orders where id = #{id}")
@@ -54,10 +55,20 @@ public interface OrderMapper {
 
     /**
      * 根据订单状态和下单时间查询订单
-     *  @param status
-     *  @param orderTime
+     *
+     * @param status
+     * @param orderTime
      */
     @Select("select * from orders where status = #{status} and order_time < #{orderTime}")
     List<Orders> getByStatusAndOrdertimeLT(Integer status, LocalDateTime orderTime);
 
+
+    /**
+     * 根据动态条件统计营业额 * @param map
+     */
+    Double sumByMap(Map map);
+
+    Long sumOrderByMap(Map map);
+
+    List<GoodsSalesDTO> getSalesTop10(LocalDateTime begin, LocalDateTime end);
 }
