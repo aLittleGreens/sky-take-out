@@ -73,7 +73,7 @@
             <if test="begin != null">and order_time &gt;= #{begin}</if>
             <if test="end != null">and order_time &lt;= #{end}</if>
         </where></select>
-    <select id="sumOrderByMap" resultType="java.lang.Long">
+    <select id="sumOrderByMap" resultType="java.lang.Integer">
         select count(id) from orders
         <where>
             <if test="begin != null">and order_time &gt;= #{begin}</if>
